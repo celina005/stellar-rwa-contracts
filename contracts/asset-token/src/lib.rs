@@ -9,6 +9,17 @@
 //!
 //! Valuation is stored in USD cents (`i128`). Amounts are integer token units in
 //! the token's own `decimals` base.
+//!
+//! ## Admin is independent of the compliance admin (issue #3)
+//!
+//! The `admin` stored in [`AssetMetadata`] (mint/pause/valuation/etc.) and the
+//! admin of the linked `compliance_contract` are tracked in entirely separate
+//! storage and are never compared to each other. Only `compliance_contract`'s
+//! `is_allowed` result is consulted here; its admin's identity is opaque to
+//! this contract. A real issuer can therefore have compliance administered by
+//! a dedicated compliance officer while a different address runs the asset
+//! token. `scripts/deploy.sh` uses one address for both only as a convenience
+//! default for its sample single-operator deployment.
 
 #[cfg(test)]
 extern crate std;

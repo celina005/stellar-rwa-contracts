@@ -876,3 +876,77 @@ fn test_total_supply_tracks_mint_burn_mint_batch() {
     // The metadata-reported supply stays in lockstep with the direct ABI read.
     assert_eq!(s.token.get_metadata().total_supply, s.token.total_supply());
 }
+
+// ---- issue #3: compliance admin and asset-token admin may diverge ----
+
+/// `scripts/deploy.sh` initializes both contracts with the same address as a
+/// convenience default, but nothing in either contract ties the two admins
+/// together. This proves a real deployment can use two distinct addresses —
+/// a dedicated compliance officer and a separate asset-token admin — with
+/// each administering only their own contract.
+#[test]
+fn test_compliance_admin_diverges_from_asset_admin() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let asset_admin = Address::generate(&env);
+    let compliance_officer = Address::generate(&env);
+    assert_ne!(asset_admin, compliance_officer);
+
+    let compliance_id = env.register(ComplianceContract, ());
+    let compliance = ComplianceContractClient::new(&env, &compliance_id);
+    compliance.initialize(&compliance_officer);
+
+    // The compliance officer — not the asset admin — approves the asset
+    // admin to hold the initial supply.
+    approve(&env, &compliance, &compliance_officer, &asset_admin);
+
+    let token_id = env.register(AssetTokenContract, ());
+    let token = AssetTokenContractClient::new(&env, &token_id);
+    token.initialize(
+        &asset_admin,
+        &String::from_str(&env, "Manhattan Loft"),
+        &String::from_str(&env, "MLOFT"),
+        &String::from_str(&env, "real_estate"),
+        &1_000i128,
+        &2u32,
+        &compliance_id,
+        &String::from_str(&env, "A tokenized NYC loft"),
+        &50_000_000i128,
+    );
+
+    // The two admins are recorded independently and are not equal.
+    assert_eq!(token.get_metadata().admin, asset_admin);
+    assert_eq!(compliance.get_admin(), compliance_officer);
+
+    // The compliance officer administers KYC entirely on their own: approve,
+    // suspend, and block a jurisdiction, none of which involves asset_admin.
+    let bob = Address::generate(&env);
+    approve(&env, &compliance, &compliance_officer, &bob);
+    token.transfer(&asset_admin, &bob, &100);
+    assert_eq!(token.balance(&bob), 100);
+
+    compliance.suspend(&compliance_officer, &bob);
+    let res = token.try_transfer(&bob, &asset_admin, &10);
+    assert_eq!(res, Err(Ok(Error::SenderNotCompliant.into())));
+
+    // The asset admin independently retains full control of the token (mint
+    // still requires only asset_admin, never the compliance officer).
+    let carol = Address::generate(&env);
+    approve(&env, &compliance, &compliance_officer, &carol);
+    token.mint(&asset_admin, &carol, &50);
+    assert_eq!(token.balance(&carol), 50);
+
+    // Neither admin has authority over the other's contract.
+    let dave = Address::generate(&env);
+    let res = compliance.try_add_to_allowlist(
+        &asset_admin,
+        &dave,
+        &String::from_str(&env, "US"),
+        &0,
+    );
+    assert_eq!(res, Err(Ok(compliance::Error::Unauthorized.into())));
+
+    let res = token.try_mint(&compliance_officer, &carol, &10);
+    assert_eq!(res, Err(Ok(Error::Unauthorized.into())));
+}

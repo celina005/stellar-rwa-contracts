@@ -8,6 +8,16 @@
 //!
 //! Time is expressed in ledger sequence numbers (`u32`), not wall-clock dates.
 //! An `expires_at` of `0` means the KYC approval never expires.
+//!
+//! ## Admin is independent of the asset-token admin (issue #3)
+//!
+//! This contract's admin (set via [`ComplianceContract::initialize`]) is its
+//! own, self-contained piece of state — nothing here reads or depends on the
+//! `admin` stored by any asset-token contract that points at it. An issuer is
+//! free to run compliance under a dedicated compliance officer's address
+//! while a different address administers the asset token; `scripts/deploy.sh`
+//! passes the same address for both purely as a convenience default for a
+//! single-operator demo deployment, not because the contracts require it.
 
 use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype, symbol_short, Address, Env, String, Vec,

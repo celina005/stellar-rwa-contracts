@@ -10,6 +10,16 @@
 # Requirements: stellar CLI (>= 22), a funded identity on the target network.
 # The script is idempotent about building; deployment always creates fresh
 # contract instances and prints their ids.
+#
+# Note (issue #3): this script initializes the compliance contract and the
+# asset-token contract with the same $ADMIN_ADDR. That is a convenience
+# default for standing up a single-operator demo/testnet deployment in one
+# shot — it is NOT a requirement of the contracts. The compliance admin and
+# the asset-token admin are independent, unrelated pieces of state (see the
+# module docs in contracts/compliance/src/lib.rs and
+# contracts/asset-token/src/lib.rs), so a real issuer can run
+# `invoke "$COMPLIANCE_ID" initialize --admin "$COMPLIANCE_OFFICER_ADDR"` with
+# a separate compliance-officer address instead.
 
 set -euo pipefail
 

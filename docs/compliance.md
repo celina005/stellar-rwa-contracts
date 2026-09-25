@@ -109,6 +109,33 @@ Listing of the contract `DataKey` variants and their storage behaviour.
 | `Record` | Address | persistent | per-key TTL |
 | `Blocked` | String | unknown | - |
 
+## Admin independence from the asset-token admin (issue #3)
+
+The admin stored by this contract is entirely separate from the `admin`
+stored by any asset-token contract that points at it as its
+`compliance_contract`. The two are never compared, and neither contract reads
+the other's admin — the asset token only ever calls the read-only
+`is_allowed`.
+
+[`scripts/deploy.sh`](../scripts/deploy.sh) initializes both contracts with
+the same address (`$ADMIN_ADDR`). That is a **convenience default** for
+standing up a single-operator demo/testnet deployment in one command, **not**
+a requirement of the contracts. A real issuer can run compliance under a
+dedicated compliance officer's address while a different address administers
+the asset token, simply by calling `initialize` on each contract with a
+different admin, e.g.:
+
+```bash
+invoke "$COMPLIANCE_ID" initialize --admin "$COMPLIANCE_OFFICER_ADDR"
+invoke "$ASSET_ID" initialize --admin "$ISSUER_ADDR" ...
+```
+
+`contracts/asset-token/src/test.rs::test_compliance_admin_diverges_from_asset_admin`
+proves this: it initializes the two contracts with distinct admins, shows the
+compliance officer can independently approve/suspend addresses and the asset
+admin can independently mint/pause, and confirms neither admin can act on the
+other's contract.
+
 ## Security considerations
 
 - All state-changing functions require the **stored admin** to both authorize
