@@ -52,6 +52,10 @@ pub struct KycRecord {
 #[derive(Clone)]
 enum DataKey {
     Admin,
+    /// Address nominated by the current admin via `propose_admin`, pending
+    /// acceptance via `accept_admin` (issue #4). Absent when there is no
+    /// proposal in flight.
+    PendingAdmin,
     /// Small fixed-size (current_page, current_page_len) cursor for appends.
     AllowlistMeta,
     /// One page of up to `ALLOWLIST_PAGE_SIZE` addresses, in persistent storage
@@ -80,6 +84,9 @@ pub enum Error {
     InvalidExpiry = 4,
     Unauthorized = 5,
     InvalidJurisdiction = 6,
+    /// `accept_admin` or `cancel_admin_proposal` called with no pending
+    /// admin proposal on file (issue #4).
+    NoPendingAdmin = 7,
 }
 
 const DAY_IN_LEDGERS: u32 = 17_280; // ~5s ledgers
@@ -385,16 +392,66 @@ impl ComplianceContract {
             .unwrap_or_else(|| panic_with_error(&env, Error::NotInitialized))
     }
 
-    /// Hand admin control over to a new address. Requires authorization from
-    /// the current admin. Emits `set_admin` carrying both the previous and
-    /// new admin so off-chain indexers can observe this security-critical
-    /// transition (issue #2).
-    pub fn transfer_admin(env: Env, admin: Address, new_admin: Address) {
+    /// Propose a new admin. Requires authorization from the current admin.
+    /// The role does not move yet — `new_admin` must call `accept_admin`
+    /// before the handover takes effect (issue #4). This makes a mistyped
+    /// `new_admin` harmless (it can simply be re-proposed or cancelled)
+    /// instead of a single-step transfer that would permanently brick
+    /// administration.
+    pub fn propose_admin(env: Env, admin: Address, new_admin: Address) {
         Self::require_admin(&env, &admin);
-        env.storage().instance().set(&DataKey::Admin, &new_admin);
+        env.storage()
+            .instance()
+            .set(&DataKey::PendingAdmin, &new_admin);
         Self::bump_instance(&env);
         env.events()
-            .publish((symbol_short!("set_admin"), admin), new_admin);
+            .publish((symbol_short!("proposed"), admin), new_admin);
+    }
+
+    /// Cancel a pending admin proposal. Requires authorization from the
+    /// current admin. Panics with `NoPendingAdmin` if there is nothing to
+    /// cancel.
+    pub fn cancel_admin_proposal(env: Env, admin: Address) {
+        Self::require_admin(&env, &admin);
+        if !env.storage().instance().has(&DataKey::PendingAdmin) {
+            panic_with_error(&env, Error::NoPendingAdmin);
+        }
+        env.storage().instance().remove(&DataKey::PendingAdmin);
+        Self::bump_instance(&env);
+        env.events()
+            .publish((symbol_short!("cancelled"), admin), ());
+    }
+
+    /// Accept a pending admin proposal, completing the handover. Must be
+    /// called by the proposed successor (issue #4); the role only ever moves
+    /// here, never in `propose_admin`. Emits `set_admin` carrying both the
+    /// previous and new admin so off-chain indexers can observe this
+    /// security-critical transition (issue #2).
+    pub fn accept_admin(env: Env, new_admin: Address) {
+        new_admin.require_auth();
+        let pending: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::PendingAdmin)
+            .unwrap_or_else(|| panic_with_error(&env, Error::NoPendingAdmin));
+        if pending != new_admin {
+            panic_with_error(&env, Error::Unauthorized);
+        }
+        let old_admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .unwrap_or_else(|| panic_with_error(&env, Error::NotInitialized));
+        env.storage().instance().set(&DataKey::Admin, &new_admin);
+        env.storage().instance().remove(&DataKey::PendingAdmin);
+        Self::bump_instance(&env);
+        env.events()
+            .publish((symbol_short!("set_admin"), old_admin), new_admin);
+    }
+
+    /// The address currently proposed as the next admin, if any.
+    pub fn get_pending_admin(env: Env) -> Option<Address> {
+        env.storage().instance().get(&DataKey::PendingAdmin)
     }
 
     // ---- internal helpers ----

@@ -772,3 +772,91 @@ fn test_create_distribution_allows_zero_balance_entry() {
     assert_eq!(ctx.dividend.claimable(&id, &ctx.h2), 0);
     assert_eq!(ctx.dividend.claimable(&id, &ctx.admin), 500);
 }
+
+// ---- admin handover (issue #4) ----
+
+#[test]
+fn test_propose_accept_admin_moves_role_only_on_acceptance() {
+    let ctx = setup();
+    let successor = Address::generate(&ctx.env);
+
+    ctx.dividend.propose_admin(&ctx.admin, &successor);
+    // Role must not move until accepted.
+    assert_eq!(ctx.dividend.get_admin(), ctx.admin);
+    assert_eq!(ctx.dividend.get_pending_admin(), Some(successor.clone()));
+
+    ctx.dividend.accept_admin(&successor);
+    assert_eq!(ctx.dividend.get_admin(), successor);
+    assert_eq!(ctx.dividend.get_pending_admin(), None);
+
+    // The old admin has lost its privileges.
+    let mut v = Vec::new(&ctx.env);
+    v.push_back((ctx.h1.clone(), 300i128));
+    let res = ctx
+        .dividend
+        .try_create_distribution(&ctx.admin, &ctx.asset_id, &ctx.pay_id, &300, &v);
+    assert_eq!(res, Err(Ok(Error::Unauthorized.into())));
+}
+
+#[test]
+fn test_cancel_admin_proposal_by_current_admin() {
+    let ctx = setup();
+    let successor = Address::generate(&ctx.env);
+
+    ctx.dividend.propose_admin(&ctx.admin, &successor);
+    ctx.dividend.cancel_admin_proposal(&ctx.admin);
+    assert_eq!(ctx.dividend.get_pending_admin(), None);
+
+    // The cancelled successor can no longer accept.
+    let res = ctx.dividend.try_accept_admin(&successor);
+    assert_eq!(res, Err(Ok(Error::NoPendingAdmin.into())));
+    // The admin is unchanged.
+    assert_eq!(ctx.dividend.get_admin(), ctx.admin);
+}
+
+#[test]
+fn test_cancel_admin_proposal_with_nothing_pending_fails() {
+    let ctx = setup();
+    let res = ctx.dividend.try_cancel_admin_proposal(&ctx.admin);
+    assert_eq!(res, Err(Ok(Error::NoPendingAdmin.into())));
+}
+
+#[test]
+fn test_non_admin_cannot_propose_admin() {
+    let ctx = setup();
+    let non_admin = Address::generate(&ctx.env);
+    let successor = Address::generate(&ctx.env);
+    let res = ctx.dividend.try_propose_admin(&non_admin, &successor);
+    assert_eq!(res, Err(Ok(Error::Unauthorized.into())));
+}
+
+#[test]
+fn test_non_admin_cannot_cancel_admin_proposal() {
+    let ctx = setup();
+    let non_admin = Address::generate(&ctx.env);
+    let successor = Address::generate(&ctx.env);
+    ctx.dividend.propose_admin(&ctx.admin, &successor);
+    let res = ctx.dividend.try_cancel_admin_proposal(&non_admin);
+    assert_eq!(res, Err(Ok(Error::Unauthorized.into())));
+}
+
+#[test]
+fn test_only_proposed_successor_can_accept() {
+    let ctx = setup();
+    let successor = Address::generate(&ctx.env);
+    let impostor = Address::generate(&ctx.env);
+
+    ctx.dividend.propose_admin(&ctx.admin, &successor);
+    let res = ctx.dividend.try_accept_admin(&impostor);
+    assert_eq!(res, Err(Ok(Error::Unauthorized.into())));
+    // Role is unaffected by the failed attempt.
+    assert_eq!(ctx.dividend.get_admin(), ctx.admin);
+}
+
+#[test]
+fn test_accept_admin_with_no_pending_proposal_fails() {
+    let ctx = setup();
+    let stranger = Address::generate(&ctx.env);
+    let res = ctx.dividend.try_accept_admin(&stranger);
+    assert_eq!(res, Err(Ok(Error::NoPendingAdmin.into())));
+}

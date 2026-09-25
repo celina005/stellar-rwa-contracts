@@ -56,6 +56,10 @@ pub struct AssetMetadata {
     /// not `unpause`, `mint`, `mint_batch`, or any other admin action.
     /// Absent (`None`) by default.
     pub guardian: Option<Address>,
+    /// Address nominated by the current admin via `propose_admin`, pending
+    /// acceptance via `accept_admin` (issue #4). Absent when there is no
+    /// proposal in flight.
+    pub pending_admin: Option<Address>,
 }
 
 #[contracttype]
@@ -80,6 +84,9 @@ pub enum Error {
     Overflow = 9,
     InvalidInput = 10,
     InvalidCompliance = 11,
+    /// `accept_admin` or `cancel_admin_proposal` called with no pending
+    /// admin proposal on file (issue #4).
+    NoPendingAdmin = 12,
 }
 
 /// Maximum byte lengths for string metadata fields (issue #46).
@@ -149,6 +156,7 @@ impl AssetTokenContract {
             valuation,
             paused: false,
             guardian: None,
+            pending_admin: None,
         };
         env.storage().instance().set(&DataKey::Metadata, &metadata);
         Self::set_balance(&env, &admin, total_supply);
@@ -379,18 +387,64 @@ impl AssetTokenContract {
             .publish((symbol_short!("setcomp"),), compliance);
     }
 
-    /// Hand admin control over to a new address. Requires authorization from
-    /// the current admin. Emits `set_admin` carrying both the previous and
-    /// new admin so off-chain indexers can observe this security-critical
-    /// transition (issue #2). Note this does not affect the optional
-    /// guardian (issue #1), which is set independently via `set_guardian`.
-    pub fn transfer_admin(env: Env, admin: Address, new_admin: Address) {
+    /// Propose a new admin. Requires authorization from the current admin.
+    /// The role does not move yet — `new_admin` must call `accept_admin`
+    /// before the handover takes effect (issue #4). This makes a mistyped
+    /// `new_admin` harmless (it can simply be re-proposed or cancelled)
+    /// instead of a single-step transfer that would permanently brick
+    /// administration. Note this does not affect the optional guardian
+    /// (issue #1), which is set independently via `set_guardian`.
+    pub fn propose_admin(env: Env, admin: Address, new_admin: Address) {
         let mut meta = Self::require_admin(&env, &admin);
-        meta.admin = new_admin.clone();
+        meta.pending_admin = Some(new_admin.clone());
         env.storage().instance().set(&DataKey::Metadata, &meta);
         Self::bump(&env);
         env.events()
-            .publish((symbol_short!("set_admin"), admin), new_admin);
+            .publish((symbol_short!("proposed"), admin), new_admin);
+    }
+
+    /// Cancel a pending admin proposal. Requires authorization from the
+    /// current admin. Panics with `NoPendingAdmin` if there is nothing to
+    /// cancel.
+    pub fn cancel_admin_proposal(env: Env, admin: Address) {
+        let mut meta = Self::require_admin(&env, &admin);
+        if meta.pending_admin.is_none() {
+            panic_err(&env, Error::NoPendingAdmin);
+        }
+        meta.pending_admin = None;
+        env.storage().instance().set(&DataKey::Metadata, &meta);
+        Self::bump(&env);
+        env.events()
+            .publish((symbol_short!("cancelled"), admin), ());
+    }
+
+    /// Accept a pending admin proposal, completing the handover. Must be
+    /// called by the proposed successor (issue #4); the role only ever moves
+    /// here, never in `propose_admin`. Emits `set_admin` carrying both the
+    /// previous and new admin so off-chain indexers can observe this
+    /// security-critical transition (issue #2).
+    pub fn accept_admin(env: Env, new_admin: Address) {
+        new_admin.require_auth();
+        let mut meta = Self::metadata(&env);
+        let pending = meta
+            .pending_admin
+            .clone()
+            .unwrap_or_else(|| panic_err(&env, Error::NoPendingAdmin));
+        if pending != new_admin {
+            panic_err(&env, Error::Unauthorized);
+        }
+        let old_admin = meta.admin.clone();
+        meta.admin = new_admin.clone();
+        meta.pending_admin = None;
+        env.storage().instance().set(&DataKey::Metadata, &meta);
+        Self::bump(&env);
+        env.events()
+            .publish((symbol_short!("set_admin"), old_admin), new_admin);
+    }
+
+    /// The address currently proposed as the next admin, if any.
+    pub fn get_pending_admin(env: Env) -> Option<Address> {
+        Self::metadata(&env).pending_admin
     }
 
     // ---- internal helpers ----

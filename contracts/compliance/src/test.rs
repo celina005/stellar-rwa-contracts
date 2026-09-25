@@ -381,3 +381,125 @@ fn test_prune_expired_removes_from_allowlist() {
     assert!(client.get_record(&user_expire).is_none());
     assert!(client.get_record(&user_persist).is_some());
 }
+
+// ---- admin handover (issue #4) ----
+
+#[test]
+fn test_propose_accept_admin_moves_role_only_on_acceptance() {
+    let (env, client, admin) = setup();
+    let successor = Address::generate(&env);
+
+    client.propose_admin(&admin, &successor);
+    // Role must not move until accepted.
+    assert_eq!(client.get_admin(), admin);
+    assert_eq!(client.get_pending_admin(), Some(successor.clone()));
+
+    client.accept_admin(&successor);
+    assert_eq!(client.get_admin(), successor);
+    assert_eq!(client.get_pending_admin(), None);
+
+    // The old admin has lost its privileges.
+    let user = Address::generate(&env);
+    let us = String::from_str(&env, "US");
+    assert_eq!(
+        client.try_add_to_allowlist(&admin, &user, &us, &0),
+        Err(Ok(Error::Unauthorized.into()))
+    );
+    // The new admin can act.
+    client.add_to_allowlist(&successor, &user, &us, &0);
+    assert!(client.is_allowed(&user));
+}
+
+#[test]
+fn test_cancel_admin_proposal_by_current_admin() {
+    let (env, client, admin) = setup();
+    let successor = Address::generate(&env);
+
+    client.propose_admin(&admin, &successor);
+    client.cancel_admin_proposal(&admin);
+    assert_eq!(client.get_pending_admin(), None);
+
+    // The cancelled successor can no longer accept.
+    assert_eq!(
+        client.try_accept_admin(&successor),
+        Err(Ok(Error::NoPendingAdmin.into()))
+    );
+    // The admin is unchanged.
+    assert_eq!(client.get_admin(), admin);
+}
+
+#[test]
+fn test_cancel_admin_proposal_with_nothing_pending_fails() {
+    let (_env, client, admin) = setup();
+    assert_eq!(
+        client.try_cancel_admin_proposal(&admin),
+        Err(Ok(Error::NoPendingAdmin.into()))
+    );
+}
+
+#[test]
+fn test_non_admin_cannot_propose_admin() {
+    let (env, client, _admin) = setup();
+    let non_admin = Address::generate(&env);
+    let successor = Address::generate(&env);
+    assert_eq!(
+        client.try_propose_admin(&non_admin, &successor),
+        Err(Ok(Error::Unauthorized.into()))
+    );
+}
+
+#[test]
+fn test_non_admin_cannot_cancel_admin_proposal() {
+    let (env, client, admin) = setup();
+    let non_admin = Address::generate(&env);
+    let successor = Address::generate(&env);
+    client.propose_admin(&admin, &successor);
+    assert_eq!(
+        client.try_cancel_admin_proposal(&non_admin),
+        Err(Ok(Error::Unauthorized.into()))
+    );
+}
+
+#[test]
+fn test_only_proposed_successor_can_accept() {
+    let (env, client, admin) = setup();
+    let successor = Address::generate(&env);
+    let impostor = Address::generate(&env);
+
+    client.propose_admin(&admin, &successor);
+    assert_eq!(
+        client.try_accept_admin(&impostor),
+        Err(Ok(Error::Unauthorized.into()))
+    );
+    // Role is unaffected by the failed attempt.
+    assert_eq!(client.get_admin(), admin);
+}
+
+#[test]
+fn test_accept_admin_with_no_pending_proposal_fails() {
+    let (env, client, _admin) = setup();
+    let stranger = Address::generate(&env);
+    assert_eq!(
+        client.try_accept_admin(&stranger),
+        Err(Ok(Error::NoPendingAdmin.into()))
+    );
+}
+
+#[test]
+fn test_propose_admin_can_be_re_proposed_to_a_different_successor() {
+    let (env, client, admin) = setup();
+    let first = Address::generate(&env);
+    let second = Address::generate(&env);
+
+    client.propose_admin(&admin, &first);
+    client.propose_admin(&admin, &second);
+    assert_eq!(client.get_pending_admin(), Some(second.clone()));
+
+    // The first proposed successor can no longer accept.
+    assert_eq!(
+        client.try_accept_admin(&first),
+        Err(Ok(Error::Unauthorized.into()))
+    );
+    client.accept_admin(&second);
+    assert_eq!(client.get_admin(), second);
+}

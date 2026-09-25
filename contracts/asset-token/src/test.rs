@@ -950,3 +950,106 @@ fn test_compliance_admin_diverges_from_asset_admin() {
     let res = token.try_mint(&compliance_officer, &carol, &10);
     assert_eq!(res, Err(Ok(Error::Unauthorized.into())));
 }
+
+// ---- admin handover (issue #4) ----
+
+#[test]
+fn test_propose_accept_admin_moves_role_only_on_acceptance() {
+    let s = setup(1_000);
+    let successor = Address::generate(&s.env);
+    approve(&s.env, &s.compliance, &s.admin, &successor);
+
+    s.token.propose_admin(&s.admin, &successor);
+    // Role must not move until accepted.
+    assert_eq!(s.token.get_metadata().admin, s.admin);
+    assert_eq!(s.token.get_pending_admin(), Some(successor.clone()));
+
+    s.token.accept_admin(&successor);
+    assert_eq!(s.token.get_metadata().admin, successor);
+    assert_eq!(s.token.get_pending_admin(), None);
+
+    // The old admin has lost its privileges.
+    let res = s.token.try_mint(&s.admin, &successor, &10);
+    assert_eq!(res, Err(Ok(Error::Unauthorized.into())));
+    // The new admin can act.
+    s.token.mint(&successor, &successor, &10);
+}
+
+#[test]
+fn test_cancel_admin_proposal_by_current_admin() {
+    let s = setup(1_000);
+    let successor = Address::generate(&s.env);
+
+    s.token.propose_admin(&s.admin, &successor);
+    s.token.cancel_admin_proposal(&s.admin);
+    assert_eq!(s.token.get_pending_admin(), None);
+
+    // The cancelled successor can no longer accept.
+    let res = s.token.try_accept_admin(&successor);
+    assert_eq!(res, Err(Ok(Error::NoPendingAdmin.into())));
+    // The admin is unchanged.
+    assert_eq!(s.token.get_metadata().admin, s.admin);
+}
+
+#[test]
+fn test_cancel_admin_proposal_with_nothing_pending_fails() {
+    let s = setup(1_000);
+    let res = s.token.try_cancel_admin_proposal(&s.admin);
+    assert_eq!(res, Err(Ok(Error::NoPendingAdmin.into())));
+}
+
+#[test]
+fn test_non_admin_cannot_propose_admin() {
+    let s = setup(1_000);
+    let non_admin = Address::generate(&s.env);
+    let successor = Address::generate(&s.env);
+    let res = s.token.try_propose_admin(&non_admin, &successor);
+    assert_eq!(res, Err(Ok(Error::Unauthorized.into())));
+}
+
+#[test]
+fn test_non_admin_cannot_cancel_admin_proposal() {
+    let s = setup(1_000);
+    let non_admin = Address::generate(&s.env);
+    let successor = Address::generate(&s.env);
+    s.token.propose_admin(&s.admin, &successor);
+    let res = s.token.try_cancel_admin_proposal(&non_admin);
+    assert_eq!(res, Err(Ok(Error::Unauthorized.into())));
+}
+
+#[test]
+fn test_only_proposed_successor_can_accept() {
+    let s = setup(1_000);
+    let successor = Address::generate(&s.env);
+    let impostor = Address::generate(&s.env);
+
+    s.token.propose_admin(&s.admin, &successor);
+    let res = s.token.try_accept_admin(&impostor);
+    assert_eq!(res, Err(Ok(Error::Unauthorized.into())));
+    // Role is unaffected by the failed attempt.
+    assert_eq!(s.token.get_metadata().admin, s.admin);
+}
+
+#[test]
+fn test_accept_admin_with_no_pending_proposal_fails() {
+    let s = setup(1_000);
+    let stranger = Address::generate(&s.env);
+    let res = s.token.try_accept_admin(&stranger);
+    assert_eq!(res, Err(Ok(Error::NoPendingAdmin.into())));
+}
+
+#[test]
+fn test_admin_handover_does_not_affect_guardian() {
+    // Issue #4: propose/accept must be independent of the guardian (issue #1).
+    let s = setup(1_000);
+    let guardian = Address::generate(&s.env);
+    let successor = Address::generate(&s.env);
+    approve(&s.env, &s.compliance, &s.admin, &successor);
+
+    s.token.set_guardian(&s.admin, &Some(guardian.clone()));
+    s.token.propose_admin(&s.admin, &successor);
+    s.token.accept_admin(&successor);
+
+    assert_eq!(s.token.get_metadata().admin, successor);
+    assert_eq!(s.token.get_metadata().guardian, Some(guardian));
+}
