@@ -366,6 +366,80 @@ fn test_mint_succeeds_after_unpause() {
 }
 
 #[test]
+fn test_guardian_absent_by_default() {
+    let s = setup(1_000);
+    assert_eq!(s.token.get_metadata().guardian, None);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #3)")]
+fn test_pause_by_stranger_reverts() {
+    let s = setup(1_000);
+    let stranger = Address::generate(&s.env);
+    s.token.pause(&stranger);
+}
+
+#[test]
+fn test_guardian_can_pause() {
+    let s = setup(1_000);
+    let guardian = Address::generate(&s.env);
+    s.token.set_guardian(&s.admin, &Some(guardian.clone()));
+    assert_eq!(s.token.get_metadata().guardian, Some(guardian.clone()));
+    s.token.pause(&guardian);
+    assert!(s.token.get_metadata().paused);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #3)")]
+fn test_guardian_cannot_unpause() {
+    let s = setup(1_000);
+    let guardian = Address::generate(&s.env);
+    s.token.set_guardian(&s.admin, &Some(guardian.clone()));
+    s.token.pause(&guardian);
+    s.token.unpause(&guardian);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #3)")]
+fn test_guardian_cannot_mint() {
+    let s = setup(1_000);
+    let guardian = Address::generate(&s.env);
+    let bob = Address::generate(&s.env);
+    approve(&s.env, &s.compliance, &s.admin, &bob);
+    s.token.set_guardian(&s.admin, &Some(guardian.clone()));
+    s.token.mint(&guardian, &bob, &100);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #3)")]
+fn test_set_guardian_by_non_admin_reverts() {
+    let s = setup(1_000);
+    let impostor = Address::generate(&s.env);
+    let guardian = Address::generate(&s.env);
+    s.token.set_guardian(&impostor, &Some(guardian));
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #3)")]
+fn test_cleared_guardian_loses_pause_rights() {
+    let s = setup(1_000);
+    let guardian = Address::generate(&s.env);
+    s.token.set_guardian(&s.admin, &Some(guardian.clone()));
+    s.token.set_guardian(&s.admin, &None);
+    assert_eq!(s.token.get_metadata().guardian, None);
+    s.token.pause(&guardian);
+}
+
+#[test]
+fn test_admin_still_pauses_with_guardian_set() {
+    let s = setup(1_000);
+    let guardian = Address::generate(&s.env);
+    s.token.set_guardian(&s.admin, &Some(guardian));
+    s.token.pause(&s.admin);
+    assert!(s.token.get_metadata().paused);
+}
+
+#[test]
 fn test_update_valuation() {
     let s = setup(1_000);
     s.token.update_valuation(&s.admin, &75_000_000);

@@ -41,6 +41,10 @@ pub struct AssetMetadata {
     /// Asset value in USD cents.
     pub valuation: i128,
     pub paused: bool,
+    /// Optional emergency-pause delegate (issue #1). May call `pause` but
+    /// not `unpause`, `mint`, `mint_batch`, or any other admin action.
+    /// Absent (`None`) by default.
+    pub guardian: Option<Address>,
 }
 
 #[contracttype]
@@ -133,6 +137,7 @@ impl AssetTokenContract {
             asset_description,
             valuation,
             paused: false,
+            guardian: None,
         };
         env.storage().instance().set(&DataKey::Metadata, &metadata);
         Self::set_balance(&env, &admin, total_supply);
@@ -289,22 +294,41 @@ impl AssetTokenContract {
         Self::metadata(&env).total_supply
     }
 
-    /// Pause all transfers and mints. Admin only.
-    pub fn pause(env: Env, admin: Address) {
-        let mut meta = Self::require_admin(&env, &admin);
+    /// Pause all transfers and mints. Callable by the admin, or by the
+    /// optional guardian (issue #1) if one has been set via
+    /// `set_guardian`. The guardian cannot unpause, mint, or perform any
+    /// other admin action.
+    pub fn pause(env: Env, caller: Address) {
+        caller.require_auth();
+        let mut meta = Self::metadata(&env);
+        let is_guardian = meta.guardian.as_ref() == Some(&caller);
+        if meta.admin != caller && !is_guardian {
+            panic_err(&env, Error::Unauthorized);
+        }
         meta.paused = true;
         env.storage().instance().set(&DataKey::Metadata, &meta);
         Self::bump(&env);
-        env.events().publish((symbol_short!("pause"),), admin);
+        env.events().publish((symbol_short!("pause"),), caller);
     }
 
-    /// Resume transfers and mints. Admin only.
+    /// Resume transfers and mints. Admin only; the guardian cannot unpause.
     pub fn unpause(env: Env, admin: Address) {
         let mut meta = Self::require_admin(&env, &admin);
         meta.paused = false;
         env.storage().instance().set(&DataKey::Metadata, &meta);
         Self::bump(&env);
         env.events().publish((symbol_short!("unpause"),), admin);
+    }
+
+    /// Set or clear the optional guardian address. Admin only. Pass `None`
+    /// to remove the guardian and restrict `pause` back to the admin alone.
+    pub fn set_guardian(env: Env, admin: Address, guardian: Option<Address>) {
+        let mut meta = Self::require_admin(&env, &admin);
+        meta.guardian = guardian;
+        env.storage().instance().set(&DataKey::Metadata, &meta);
+        Self::bump(&env);
+        env.events()
+            .publish((symbol_short!("guardian"),), meta.guardian);
     }
 
     /// Full asset metadata.
