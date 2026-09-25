@@ -64,6 +64,8 @@ pub trait TokenInterface {
 - `get_distributions_for_asset(asset_token) -> Vec<Distribution>`
 - `has_claimed(distribution_id, holder) -> bool`
 - `get_admin() -> Address`
+- `transfer_admin(admin, new_admin)` — admin auth; hands admin control to
+  `new_admin`.
 
 ## Errors
 
@@ -88,6 +90,7 @@ pub trait TokenInterface {
 | `init`    | admin                      | initialize          |
 | `created` | (admin) → (id, total)      | distribution funded |
 | `claim`   | (holder) → (id, amount)    | holder claims       |
+| `set_admin` | (old_admin) → new_admin | admin handed over    |
 
 ## Storage / TTL
 

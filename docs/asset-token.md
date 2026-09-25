@@ -59,6 +59,8 @@ in metadata and can be swapped with `set_compliance`.
 - `get_metadata() -> AssetMetadata`
 - `update_valuation(admin, new_valuation)` — admin auth.
 - `set_compliance(admin, compliance)` — admin auth; repoints the gate.
+- `transfer_admin(admin, new_admin)` — admin auth; hands admin control to
+  `new_admin`.
 
 ## Errors
 
@@ -85,6 +87,7 @@ in metadata and can be swapped with `set_compliance`.
 | `unpause`   | admin                   | unpause      |
 | `valuation` | new valuation           | valuation up |
 | `setcomp`   | compliance address      | gate changed |
+| `set_admin` | (old_admin) → new_admin | admin handed over |
 
 ## Storage / TTL
 

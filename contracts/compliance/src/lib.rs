@@ -375,6 +375,18 @@ impl ComplianceContract {
             .unwrap_or_else(|| panic_with_error(&env, Error::NotInitialized))
     }
 
+    /// Hand admin control over to a new address. Requires authorization from
+    /// the current admin. Emits `set_admin` carrying both the previous and
+    /// new admin so off-chain indexers can observe this security-critical
+    /// transition (issue #2).
+    pub fn transfer_admin(env: Env, admin: Address, new_admin: Address) {
+        Self::require_admin(&env, &admin);
+        env.storage().instance().set(&DataKey::Admin, &new_admin);
+        Self::bump_instance(&env);
+        env.events()
+            .publish((symbol_short!("set_admin"), admin), new_admin);
+    }
+
     // ---- internal helpers ----
 
     fn require_admin(env: &Env, admin: &Address) {

@@ -72,6 +72,10 @@ Whether a jurisdiction is currently blocked.
 ### `get_admin() -> Address`
 The configured admin. Errors: `NotInitialized (#2)`.
 
+### `transfer_admin(admin, new_admin)`
+Hands admin control to `new_admin`. Requires the **current** admin's auth.
+Errors: `Unauthorized (#5)`.
+
 ## Errors
 
 | Code | Name                | Cause                                   |
@@ -92,6 +96,7 @@ The configured admin. Errors: `NotInitialized (#2)`.
 | `removed`    | (address)                     | address removed            |
 | `blockjur`   | jurisdiction                  | jurisdiction blocked       |
 | `unblkjur`   | jurisdiction                  | jurisdiction unblocked     |
+| `set_admin`  | (old_admin) → new_admin       | admin handed over          |
 
 ## Storage / TTL
 

@@ -32,6 +32,8 @@ and reports total value locked (TVL).
 - `total_value_locked() -> i128` — sum of `valuation` over active assets.
 - `asset_count() -> u64`
 - `get_admin() -> Address`
+- `transfer_admin(admin, new_admin)` — admin auth; hands admin control to
+  `new_admin`.
 
 ## Errors
 
@@ -50,6 +52,7 @@ and reports total value locked (TVL).
 | `init`      | admin             | initialize        |
 | `register`  | (issuer) → id     | asset registered  |
 | `deactvate` | asset_id          | asset deactivated |
+| `set_admin` | (old_admin) → new_admin | admin handed over |
 
 ## Storage / TTL
 

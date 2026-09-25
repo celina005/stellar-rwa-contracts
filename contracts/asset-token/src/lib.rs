@@ -368,6 +368,20 @@ impl AssetTokenContract {
             .publish((symbol_short!("setcomp"),), compliance);
     }
 
+    /// Hand admin control over to a new address. Requires authorization from
+    /// the current admin. Emits `set_admin` carrying both the previous and
+    /// new admin so off-chain indexers can observe this security-critical
+    /// transition (issue #2). Note this does not affect the optional
+    /// guardian (issue #1), which is set independently via `set_guardian`.
+    pub fn transfer_admin(env: Env, admin: Address, new_admin: Address) {
+        let mut meta = Self::require_admin(&env, &admin);
+        meta.admin = new_admin.clone();
+        env.storage().instance().set(&DataKey::Metadata, &meta);
+        Self::bump(&env);
+        env.events()
+            .publish((symbol_short!("set_admin"), admin), new_admin);
+    }
+
     // ---- internal helpers ----
 
     fn metadata(env: &Env) -> AssetMetadata {
